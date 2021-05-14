@@ -2,6 +2,7 @@
 import sys
 import os
 import time
+import re
 import shutil
 # from openpyxl import Workbook
 import openpyxl
@@ -11,7 +12,7 @@ import csv
 import logging
 import socket
 import xlrd
-import pyvisa_py
+# import pyvisa_py
 import pyvisa
 from RsInstrument import *
 from RsInstrument.RsInstrument import RsInstrument, BinIntFormat
@@ -21,13 +22,18 @@ import pandas as pd
 from operator import itemgetter
 from ppadb.client import Client as AdbClient
 from glob import glob
-#import glob
 from pandas import ExcelWriter
 from ctf_json_data import CtfJsonData
-from ctf_json_data import CtfJsonData
 
 
-# create a log
+# Setup Configuration
+cmw_interface = "LAN"  # GPIB LAN
+fsw_interface = "LAN"
+# sw_box_interface = "GPIB"
+# pwr_supp_interface = "GPIB"
+dut_adb_serial_number = "225c2b92"  # "4D123456789"
+screenshot_host_ip = "192.168.0.219"  # "172.22.1.5"
+
 # create a log
 logger = logging.getLogger(__name__)
 # output format
@@ -40,7 +46,6 @@ sh = logging.StreamHandler()
 sh.setFormatter(logging.Formatter(logger_format))
 logger.addHandler(sh)
 logger.setLevel(logging.DEBUG)
-#logger.setLevel(logging.DEBUG)
 # Making a directory For the Run
 mydir = os.path.join('{0}'.format(os.getcwd().split('D')[0]), "LTE_TX_SPURIOUS_MSMT",
                      '{0}_{1}_{2}'.format("FULL_RUN_LOGS", datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'), sys.argv[1],
@@ -512,6 +517,45 @@ while int(row_count) < end_of_loop:  # stop variant
         timeout = property(__get_timeout, __set_timeout, None, """ timeout """)
 
 
+    class c_gpib(object):
+        """ GPIB Interface """
+        def __init__(self, instr_name):
+            # TODO: move address to setting file
+            self.cmw_gpib_addr = 'GPIB0::20::INSTR'
+            self.fsw_gpib_addr = 'GPIB0::21::INSTR'
+            self.sw_box_gpib_addr = 'GPIB0::4::INSTR'
+            self.pwr_supply_gpib_addr = 'GPIB0::5::INSTR'
+            self.instr_name = instr_name
+            self.instr = None
+
+        def connect(self):
+            try:
+                rm = pyvisa.ResourceManager()
+                if self.instr_name.upper() == 'CMW':
+                    self.instr = rm.open_resource(self.cmw_gpib_addr)
+                elif self.instr_name.upper() == 'FSW':
+                    self.instr = rm.open_resource(self.fsw_gpib_addr)
+                elif self.instr_name.upper() == 'SW_BOX':
+                    self.instr = rm.open_resource(self.sw_box_gpib_addr)
+                else:
+                    logger.error("Invalid instrument name!")
+                logger.info("Connect {} GPIB interface".format(self.instr_name.upper()))
+            except Exception as Err:
+                raise Err
+
+        def write(self, cmd):
+            self.instr.write(cmd)
+
+        def read(self):
+            self.instr.read()
+
+        def ask(self, cmd):
+            return self.instr.query(cmd)
+
+        def close(self):
+            self.instr.close()
+
+
     class c_lte(object):
 
         def __init__(self):
@@ -554,7 +598,6 @@ while int(row_count) < end_of_loop:  # stop variant
 
     # Look for UE device
     # TODO: make CLI argument
-    dut_adb_serial_number = '225c2b92'
 
     # Default is "127.0.0.1" and 5037
     client = AdbClient(host="127.0.0.1", port=5037)
@@ -753,8 +796,11 @@ while int(row_count) < end_of_loop:  # stop variant
             logger.info('Create a Socket Class object to remote the CMW')
             kwargs = {'timeout': cmw_socket_timeout, 'temchar': cmw_socket_termchar}
 
-            # get a socket instance for controlling CMW
-            cmw = c_socket(cmw_host, cmw_socket_port, **kwargs)
+            # get instance for controlling CMW
+            if cmw_interface == "LAN":
+                cmw = c_socket(cmw_host, cmw_socket_port, **kwargs)
+            else:
+                cmw = c_gpib("CMW")
 
             # connect to CMW
             cmw.connect()
@@ -784,7 +830,12 @@ while int(row_count) < end_of_loop:  # stop variant
             if not hasattr(cmw, 'BASE_FW'):
                 setattr(cmw, 'BASE_FW', 'CMW')
 
-            buffin = cmw.ask("*IDN?")
+            buffin = ''
+            if cmw_interface == "LAN":
+                buffin = cmw.ask("*IDN?")
+            else:
+                buffin = cmw.ask("*IDN?").split(',')
+
             logger.debug(buffin)
             if 'k50' in buffin[2]:
                 cmw.id = 'CMW500'
@@ -805,14 +856,23 @@ while int(row_count) < end_of_loop:  # stop variant
             if not hasattr(cmw, 'opt'):
                 setattr(cmw, 'opt', [])
             cmw.opt = cmw.ask("*OPT?")
+            time.sleep(3)
 
             if not hasattr(cmw, 'hw_list'):
                 setattr(cmw, 'hw_list', [])
-            cmw.hw_list = cmw.ask('SYST:BASE:OPT:LIST? HWOP,FUNC')[0][1:-1].split(',')
+
+            if cmw_interface == "LAN":
+                cmw.hw_list = cmw.ask('SYST:BASE:OPT:LIST? HWOP,FUNC')[0][1:-1].split(',')
+            else:
+                cmw.hw_list = cmw.ask('SYST:BASE:OPT:LIST? HWOP,FUNC')[1:-1].split(',')
 
             if not hasattr(cmw, 'sw_list'):
                 setattr(cmw, 'sw_list', [])
-            cmw.sw_list = cmw.ask('SYST:BASE:OPT:LIST? SWOP,VALid')[0][1:-1].split(',')
+
+            if cmw_interface == "LAN":
+                cmw.sw_list = cmw.ask('SYST:BASE:OPT:LIST? SWOP,VALid')[0][1:-1].split(',')
+            else:
+                cmw.sw_list = cmw.ask('SYST:BASE:OPT:LIST? SWOP,VALid')[1:-1].split(',')
 
             # get CMW LTE FW revision
             logger.info('{0}'.format(132 * '-'))
@@ -850,18 +910,30 @@ while int(row_count) < end_of_loop:  # stop variant
 
                 TIMEOUT = 45.0
                 tstart = time.time()
-                buffin = cmw.ask("SOUR:LTE:SIGN:CELL:STAT:ALL?")
-                while not (buffin[0] == "OFF" and buffin[1] == "ADJ"):
+                if cmw_interface == "LAN":
+                    buffin = cmw.ask("SOUR:LTE:SIGN:CELL:STAT:ALL?")
+                    while not (buffin[0] == "OFF" and buffin[1] == "ADJ"):
+                        # wait 500 ms
+                        time.sleep(0.5)
+                        # query LTE CELL state
+                        buffin = cmw.ask("SOURce:LTE:SIGN:CELL:STAT:ALL?")
+                        # check TIMEOUT
+                        if (time.time() - tstart) > TIMEOUT:
+                            # x = win32api.MessageBox(0, "TIMEOUT occurs")
+                            raise ValueError('TIMEOUT - LTE Signaling Turn OFF')
+                else:
+                    buffin = cmw.ask("SOUR:LTE:SIGN:CELL:STAT:ALL?").split(',')
+                    while not (re.search('OFF', buffin[0], flags=re.IGNORECASE) and
+                               re.search("ADJ", buffin[1], flags=re.IGNORECASE)):
+                        # wait 500 ms
+                        time.sleep(0.5)
+                        # query LTE CELL state
+                        buffin = cmw.ask("SOURce:LTE:SIGN:CELL:STAT:ALL?").split(',')
+                        # check TIMEOUT
+                        if (time.time() - tstart) > TIMEOUT:
+                            # x = win32api.MessageBox(0, "TIMEOUT occurs")
+                            raise ValueError('TIMEOUT - LTE Signaling Turn OFF')
 
-                    # wait 500 ms
-                    time.sleep(0.5)
-                    # query LTE CELL state
-                    buffin = cmw.ask("SOURce:LTE:SIGN:CELL:STAT:ALL?")
-                    # check TIMEOUT
-                    if (time.time() - tstart) > TIMEOUT:
-                        # x = win32api.MessageBox(0, "TIMEOUT occurs")
-                        raise ValueError('TIMEOUT - LTE Signaling Turn OFF')
-                    #
                 logger.info('LTE Cell - LTE CELL IS TURN OFF')
                 logger.info('{0}'.format(132 * '-'))
 
@@ -874,7 +946,11 @@ while int(row_count) < end_of_loop:  # stop variant
                 for service in dau_service_l:
 
                     # Check DAU service
-                    status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service))[0]
+                    status = ''
+                    if cmw_interface == "LAN":
+                        status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service))[0]
+                    else:
+                        status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service))
                     logger.debug("Status of DAU : {0}".format(status))
 
                     # Turn OFF
@@ -884,13 +960,20 @@ while int(row_count) < end_of_loop:  # stop variant
                         status = ''
                         while status != 'OFF':
                             time.sleep(0.150)
-                            status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service))[0]
+                            if cmw_interface == "LAN":
+                                status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service))[0]
+                            else:
+                                status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service)).rstrip()
 
                         logger.debug('DAU service {0} is OFF'.format(service))
 
                 # get IPV4 and IPV6 type
-                buffipv4 = cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE?")[0]
-                buffipv6 = cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE?")[0]
+                if cmw_interface == "LAN":
+                    buffipv4 = cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE?")[0]
+                    buffipv6 = cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE?")[0]
+                else:
+                    buffipv4 = cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE?")
+                    buffipv6 = cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE?")
 
                 if 'external' in dau_ipv4_config or 'external' in dau_ipv6_config:
 
@@ -939,24 +1022,23 @@ while int(row_count) < end_of_loop:  # stop variant
 
                     logger.debug('DAU -  Check  IP Config  Network')
 
-                buffin = cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE?")[0]
-                if buffin != "AUT":
-                    cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE AUT;*OPC?")
+                if cmw_interface == "LAN":
+                    buffin = cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE?")[0]
+                    if buffin != "AUT":
+                        cmw.ask("CONFigure:DATA:CONTrol:IPVFour:ADDRess:TYPE AUT;*OPC?")
 
-                buffin = cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE?")[0]
-                if buffin != "AUTO":
-                    cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE AUTO;*OPC?")
+                    buffin = cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE?")[0]
+                    if buffin != "AUTO":
+                        cmw.ask("CONFigure:DATA:CONTrol:IPVSix:ADDRess:TYPE AUTO;*OPC?")
 
-                # DAU -  Configure DNS Service
-                logger.debug('DAU -  Configure DNS Service')
-                cmw.write(
-                    'CONFigure:DATA:CONT:DNS:LOCal:ADD "epdg.epc.mnc{0}.mcc{1}.pub.3gppnetwork.org", "{2}"'.format(MNC,
-                                                                                                                   MCC,
-                                                                                                                   epdg_ip_v4))
-                cmw.write(
-                    'CONFigure:DATA:CONT:DNS:LOCal:ADD "epdg.epc.mnc{0}.mcc{1}.pub.3gppnetwork.org", "{2}"'.format(MNC,
-                                                                                                                   MCC,
-                                                                                                                   epdg_ip_v6))
+                    # DAU -  Configure DNS Service
+                    logger.debug('DAU -  Configure DNS Service')
+                    cmw.write(
+                        'CONFigure:DATA:CONT:DNS:LOCal:ADD "epdg.epc.mnc{0}.mcc{1}.pub.3gppnetwork.org", "{2}"'.format(
+                            MNC, MCC, epdg_ip_v4))
+                    cmw.write(
+                        'CONFigure:DATA:CONT:DNS:LOCal:ADD "epdg.epc.mnc{0}.mcc{1}.pub.3gppnetwork.org", "{2}"'.format(
+                            MNC, MCC, epdg_ip_v6))
 
                 # DAU IMS2 - Configure subscriber
                 logger.debug('DAU IMS2 - Configure subscriber')
@@ -1143,10 +1225,10 @@ while int(row_count) < end_of_loop:  # stop variant
             logger.info(' Configure RMC Test Mode Call. (User Defined Channel)')
             cmw.write("CONF:LTE:SIGN:CONN:UET UDCH")
 
-            cmw.write("CONF:LTE:SIGN:CONN:UDCH:DL {0},{1},{2},{3}".format(DL_RB_Allocation, DL_RB_Start, DL_MODULATION,
-                                                                          DL_TBS))
-            cmw.write("CONF:LTE:SIGN:CONN:UDCH:UL {0},{1},{2},{3}".format(UL_RB_Allocation, UL_RB_Start, UL_MODULATION,
-                                                                          UL_TBS))
+            # cmw.write("CONF:LTE:SIGN:CONN:UDCH:DL {0},{1},{2},{3}".format(DL_RB_Allocation,
+            #       DL_RB_Start, DL_MODULATION, DL_TBS))
+            # cmw.write("CONF:LTE:SIGN:CONN:UDCH:UL {0},{1},{2},{3}".format(UL_RB_Allocation,
+            #       UL_RB_Start, UL_MODULATION, UL_TBS))
 
             erreur = cmw.ask("SYST:ERR:ALL?")
             if erreur[0] != '0':
@@ -1178,7 +1260,8 @@ while int(row_count) < end_of_loop:  # stop variant
 
                     status = ''
                     while status != 'ON':
-                        time.sleep(0.150)
+                        cmw.write("SOURce:DATA:CONT:{0}:STATe ON".format(service))
+                        time.sleep(2)  # 0.150)
                         status = cmw.ask("SOURce:DATA:CONT:{0}:STATe?".format(service))[0]
 
                 logger.info('DAU service {0} is ON'.format(service))
@@ -1195,9 +1278,11 @@ while int(row_count) < end_of_loop:  # stop variant
             logger.info('Create a Socket Class object to remote the fsw')
             kwargs = {'timeout': fsw_socket_timeout, 'temchar': fsw_socket_termchar}
 
-            # get a socket instance for controlling CMW
-
-            fsw = c_socket(fsw_host, fsw_socket_port, **kwargs)
+            # get instance for controlling CMW
+            if fsw_interface == "LAN":
+                fsw = c_socket(fsw_host, fsw_socket_port, **kwargs)
+            else:
+                fsw = c_gpib("FSW")
 
             # connect to FSW
             fsw.connect()
@@ -1314,13 +1399,29 @@ while int(row_count) < end_of_loop:  # stop variant
                 cmw.write("SOUR:LTE:SIGN:CELL:STATe ON")
                 TIMEOUT = 60.0
                 tstart = time.time()
-                buffin = cmw.ask("SOUR:LTE:SIGN:CELL:STAT:ALL?")
-                while not (buffin[0] == 'ON' and buffin[1] == "ADJ"):
-                    buffin = cmw.ask("SOURce:LTE:SIGN:CELL:STAT:ALL?")
-                    time.sleep(0.5)
-                    if (time.time() - tstart) > TIMEOUT:
-                        # x = win32api.MessageBox(0, "TIMEOUT occurs")
-                        raise ValueError('TIMEOUT - LTE Signaling Turn OFF')
+                buffin = None
+
+                if cmw_interface == "LAN":
+                    buffin = cmw.ask("SOUR:LTE:SIGN:CELL:STAT:ALL?")
+                else:
+                    buffin = cmw.ask("SOUR:LTE:SIGN:CELL:STAT:ALL?").split(',')
+
+                if cmw_interface == "LAN":
+                    while not (buffin[0] == 'ON' and buffin[1] == "ADJ"):
+                        buffin = cmw.ask("SOURce:LTE:SIGN:CELL:STAT:ALL?")
+                        time.sleep(0.5)
+                        if (time.time() - tstart) > TIMEOUT:
+                            # x = win32api.MessageBox(0, "TIMEOUT occurs")
+                            raise ValueError('TIMEOUT - LTE Signaling Turn OFF')
+                else:
+                    while not (re.search('ON', buffin[0], flags=re.IGNORECASE) and
+                               re.search("ADJ", buffin[1], flags=re.IGNORECASE)):
+                        buffin = cmw.ask("SOURce:LTE:SIGN:CELL:STAT:ALL?").split(',')
+                        # logger.debug("LTE Signaling = '{}'".format(buffin))
+                        time.sleep(0.5)
+                        if (time.time() - tstart) > TIMEOUT:
+                            raise ValueError('TIMEOUT - LTE Signaling Turn OFF')
+
                 logger.info('LTE CELL READY')
                 logger.info('{0}'.format(132 * '-'))
             time.sleep(2)
@@ -1329,15 +1430,27 @@ while int(row_count) < end_of_loop:  # stop variant
             TIMEOUT = 30
             # changed
             tstart = time.time()
-            buffin = cmw.ask('CATalog:LTE:SIGN:CONNection:DEFBearer?')[0]  ##{ ["5 (Test Network)","6 (ims)"]}
-            logger.debug("Bearers in buffin {0}".format(buffin))
-            state = cmw.ask('SENSE:LTE:SIGN:RRCState?')[0]
-            logger.debug("cmw RRC state is : {0}".format(state))
+
+            if cmw_interface == "LAN":
+                buffin = cmw.ask('CATalog:LTE:SIGN:CONNection:DEFBearer?')[0]  ##{ ["5 (Test Network)","6 (ims)"]}
+                logger.debug("Bearers in buffin {0}".format(buffin))
+                state = cmw.ask('SENSE:LTE:SIGN:RRCState?')[0]
+                logger.debug("cmw RRC state is : {0}".format(state))
+            else:
+                buffin = cmw.ask('CATalog:LTE:SIGN:CONNection:DEFBearer?')
+                logger.debug("Bearers in buffin {0}".format(buffin))
+                state = cmw.ask('SENSE:LTE:SIGN:RRCState?')
+                logger.debug("cmw RRC state is : {0}".format(state))
+
             device.shell('ip addr >DUT_ip.txt')
             device.shell('devices')
             while not "5 (Test Network)" in buffin:
-                buffin = cmw.ask('CATalog:LTE:SIGN:CONNection:DEFBearer?')[0]
-                time.sleep(0.5)
+                if cmw_interface == "LAN":
+                    buffin = cmw.ask('CATalog:LTE:SIGN:CONNection:DEFBearer?')[0]
+                else:
+                    buffin = cmw.ask('CATalog:LTE:SIGN:CONNection:DEFBearer?')
+
+                time.sleep(1)
                 if (time.time() - tstart) > TIMEOUT:
                     logger.info('TIMEOUT - Default Bearers not present')
                     # Toggle airplane mode on -> off
@@ -1405,7 +1518,12 @@ while int(row_count) < end_of_loop:  # stop variant
                 logger.debug('TX demodulation is: {0}'.format(TX_demodulation))
                 TX_DCHType = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:DCHType?")
                 logger.debug('TX DCHType is: {0}'.format(TX_DCHType))
-                Txmeas = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:CURRent?")
+
+                if cmw_interface == "LAN":
+                    Txmeas = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:CURRent?")
+                else:
+                    Txmeas = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:CURRent?")[:-1].split(',')
+
                 logger.debug('TX Meas is: {0}'.format(Txmeas))
                 res = ['1_Reliability', '2_OutOfTol', '3_EVM_RMSlow', '4_EVM_RMShigh', '5_EVMpeakLow', '6_EVMpeakHigh',
                        '7_MErr_RMSlow', '8_MErr_RMShigh', '9_MErrPeakLow', '10_MErrPeakHigh', '11_PErr_RMSlow',
@@ -1453,7 +1571,11 @@ while int(row_count) < end_of_loop:  # stop variant
                 logger.debug(132 * '_')
                 logger.info('{0}'.format(132 * '-'))
 
-                Tx_multi_avg_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:AVERage?")
+                if cmw_interface == "LAN":
+                    Tx_multi_avg_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:AVERage?")
+                else:
+                    Tx_multi_avg_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:AVERage?").split(',')
+
                 res = ['1_Reliability', '2_OutOfTol', '3_EVM_RMSlow', '4_EVM_RMShigh', '5_EVMpeakLow', '6_EVMpeakHigh',
                        '7_MErr_RMSlow', '8_MErr_RMShigh', '9_MErrPeakLow', '10_MErrPeakHigh', '11_PErr_RMSlow',
                        '12_PErr_RMSh', '13_PErrPeakLow', '14_PErrPeakHigh', '15_IQoffset', '16_FreqError',
@@ -1465,9 +1587,13 @@ while int(row_count) < end_of_loop:  # stop variant
                     if 'E+' in meas or 'E-' in meas:
                         Tx_multi_avg_result[i_meas] = '{0:8.3f}'.format(float(meas))
                     logger.debug('{0}:{1:>8}'.format(res[i_meas], Tx_multi_avg_result[i_meas]))
+                    logger.debug("Tx multievaluation average:{0}".format(Tx_multi_avg_result))
 
-                logger.debug("Tx multievaluation average:{0}".format(Tx_multi_avg_result))
-                Tx_multi_extreme_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:EXTReme?")
+                if cmw_interface == "LAN":
+                    Tx_multi_extreme_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:EXTReme?")
+                else:
+                    Tx_multi_extreme_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:EXTReme?").split(',')
+
                 res1 = ['1_Reliability', '2_OutOfTol', '3_EVM_RMSlow', '4_EVM_RMShigh', '5_EVMpeakLow', '6_EVMpeakHigh',
                         '7_MErr_RMSlow', '8_MErr_RMShigh', '9_MErrPeakLow', '10_MErrPeakHigh', '11_PErr_RMSlow',
                         '12_PErr_RMSh', '13_PErrPeakLow', '14_PErrPeakHigh', '15_IQoffset', '16_FreqError',
@@ -1502,9 +1628,14 @@ while int(row_count) < end_of_loop:  # stop variant
 
             fsw.write("INIT:SPUR; *WAI")
             # time.sleep(.5)
-            fsw.result = fsw.ask("CALC:LIM1:FAIL?")
-            logger.debug('result is: {0}'.format(fsw.result))  # this scpi
-            list_of_Freq = fsw.ask("TRAC:DATA? SPURIOUS")
+            # fsw.result = fsw.ask("CALC:LIM1:FAIL?")
+            # logger.debug('result is: {0}'.format(fsw.result))  # this scpi
+            time.sleep(25)
+            if fsw_interface == "LAN":
+                list_of_Freq = fsw.ask("TRAC:DATA? SPURIOUS")
+            else:
+                list_of_Freq = fsw.ask("TRAC:DATA? SPURIOUS").split(',')
+
             time.sleep(7)
             # when it returns, at that time length of list_freq ==1
             logger.debug(len(list_of_Freq))
@@ -1651,9 +1782,9 @@ while int(row_count) < end_of_loop:  # stop variant
             " {0}	 \t\t  :{1} (MHz) \t\t	: {2} (MHz)\t	\t\t: {3}	   \t\t\t : {4}	\t\t\t  {5}  ".format(
                 Band, Channel_Bandwidth, DL_EARFCN, DL_RB_Allocation, DL_RB_Start, pmx))
         # Storing the output in json
-        rth = RsInstrument('TCPIP::192.168.0.219::INSTR')
+        rth = RsInstrument('TCPIP::{}::INSTR'.format(screenshot_host_ip))
         rm = pyvisa.ResourceManager()
-        instr = rm.open_resource('TCPIP::192.168.0.219::INSTR')  # replace by your IP-address
+        instr = rm.open_resource('TCPIP::{}::INSTR'.format(screenshot_host_ip))  # replace by your IP-address
         instr.timeout = 3000
         instr.write('INIT:CONT OFF')
         # truns on color printing
@@ -1877,4 +2008,3 @@ if __name__ == "__main__":
     cv.create_json()
 
 # THE END
-
