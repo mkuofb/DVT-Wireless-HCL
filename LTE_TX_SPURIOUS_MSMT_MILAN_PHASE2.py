@@ -27,12 +27,31 @@ from ctf_json_data import CtfJsonData
 
 
 # Setup Configuration
-cmw_interface = "LAN"  # GPIB LAN
+test_environment = "phase1"  # phase1 or phase2
+cmw_interface = "LAN"
 fsw_interface = "LAN"
-# sw_box_interface = "GPIB"
+sw_box_interface = "GPIB"
 # pwr_supp_interface = "GPIB"
-dut_adb_serial_number = "225c2b92"  # "4D123456789"
-screenshot_host_ip = "192.168.0.219"  # "172.22.1.5"
+dut_adb_serial_number = "225c2b92"
+screenshot_host_ip = "192.168.0.219"
+swbox = None
+pathloss_file = {1:'S46_B1-C1_pathloss', 2:'S46_B2-C2_pathloss', 3:'S46_B3-C3_pathloss',
+                 4:'S46_B4-C4_pathloss', 5:'S46_B5-C5_pathloss', 6:'S46_B6-C6_pathloss',
+                 0:'dummy_FSW_pathloss'}
+
+# Config Phase1 or Phase2 settings
+if test_environment.upper() == "PHASE1":
+    cmw_interface = "LAN"
+    fsw_interface = "LAN"
+    sw_box_interface = "NA"
+    dut_adb_serial_number = "225c2b92"
+    screenshot_host_ip = "192.168.0.219"
+else:
+    cmw_interface = "GPIB"
+    fsw_interface = "GPIB"
+    sw_box_interface = "GPIB"
+    dut_adb_serial_number = "4D123456789"
+    screenshot_host_ip = "172.22.1.5"
 
 # create a log
 logger = logging.getLogger(__name__)
@@ -226,14 +245,14 @@ while int(row_count) < end_of_loop:  # stop variant
     DL_MODULATION = str(sheet.cell_value(row_count, 17))
     DL_TBS = int(sheet.cell_value(row_count, 18))
 
-    freq_start_r1 = int(sheet.cell_value(row_count, 19)) * 1000000
-    freq_stop_r1 = int(sheet.cell_value(row_count, 20)) * 1000000
+    freq_start_r1 = int(sheet.cell_value(row_count, 19))
+    freq_stop_r1 = int(sheet.cell_value(row_count, 20))
     DelFOB = int(sheet.cell_value(row_count, 21))
     switch_path = int(sheet.cell_value(row_count, 22))
     ref_level = int(sheet.cell_value(row_count, 23))
     attn = int(sheet.cell_value(row_count, 24))
-    rbw = float(sheet.cell_value(row_count, 25)) * 1000000
-    vbw = float(sheet.cell_value(row_count, 26)) * 1000000
+    rbw = float(sheet.cell_value(row_count, 25))
+    vbw = float(sheet.cell_value(row_count, 26))
     pre_amp = str(sheet.cell_value(row_count, 27))
     Trace = str(sheet.cell_value(row_count, 28))
     Detector = str(sheet.cell_value(row_count, 29))
@@ -517,10 +536,9 @@ while int(row_count) < end_of_loop:  # stop variant
         timeout = property(__get_timeout, __set_timeout, None, """ timeout """)
 
 
-    class c_gpib(object):
+    class c_gpib():
         """ GPIB Interface """
         def __init__(self, instr_name):
-            # TODO: move address to setting file
             self.cmw_gpib_addr = 'GPIB0::20::INSTR'
             self.fsw_gpib_addr = 'GPIB0::21::INSTR'
             self.sw_box_gpib_addr = 'GPIB0::4::INSTR'
@@ -554,6 +572,92 @@ while int(row_count) < end_of_loop:  # stop variant
 
         def close(self):
             self.instr.close()
+
+
+    class c_switchbox():
+        """ KEITHLEY S46 Switch Box Control """
+        def __init__(self):
+            self.swbox = None
+
+        def connect(self):
+            self.swbox = c_gpib("SW_BOX")
+            self.swbox.connect()
+
+        def write(self, cmd):
+            self.swbox.write(cmd)
+
+        def ask(self, cmd) -> str:
+            msg = self.swbox.query(cmd)
+            return msg
+
+        def read(self) -> str:
+            msg = self.swbox.read()
+            return msg
+
+        def query_closed_channels(self):
+            chs = self.ask("ROUT:CLOS?")
+            logger.info("SW Box closed channels: {}".format(chs))
+
+        def set_all_port_open(self):
+            logger.info("SW Box open all ports")
+            cmd = "ROUT:OPEN:ALL"
+            self.write(cmd)
+
+        def set_wire_only_path(self):
+            logger.info("SW Box switch to wire path")
+            cmd = ["ROUT:OPEN:ALL", "ROUT:CLOS (@7,13)"]
+            self.write(cmd[0])
+            self.write(cmd[1])
+
+        def set_10db_atten_path(self):
+            logger.info("SW Box switch to 10dB atten path")
+            cmd = ["ROUT:OPEN:ALL", "ROUT:CLOS (@8,14)"]
+            self.write(cmd[0])
+            self.write(cmd[1])
+
+        def set_1p2g_hpf_path(self):
+            logger.info("SW Box switch to 1.2GHz HPF path")
+            cmd = ["ROUT:OPEN:ALL", "ROUT:CLOS (@9,15)"]
+            self.write(cmd[0])
+            self.write(cmd[1])
+
+        def set_3g_hpf_path(self):
+            logger.info("SW Box switch to 3.0GHz HPF path")
+            cmd = ["ROUT:OPEN:ALL", "ROUT:CLOS (@10,16)"]
+            self.write(cmd[0])
+            self.write(cmd[1])
+
+        def set_6p4g_hpf_path(self):
+            logger.info("SW Box switch to 6.4GHz HPF path")
+            cmd = ["ROUT:OPEN:ALL", "ROUT:CLOS (@11,17)"]
+            self.write(cmd[0])
+            self.write(cmd[1])
+
+        def set_18g_hpf_path(self):
+            logger.info("SW Box switch to 18.0GHz HPF path")
+            cmd = ["ROUT:OPEN:ALL", "ROUT:CLOS (@12,18)"]
+            self.write(cmd[0])
+            self.write(cmd[1])
+
+        def set_sw_box(self, switch_path):
+            logger.info("SW Box switch_path = {}".format(switch_path))
+
+            if not (switch_path >= 1 or switch_path <= 6):
+                logger.info("Invalid switch_path value. Use default value 1")
+                switch_path = 1
+
+            if switch_path == 1:
+                self.set_wire_only_path()
+            elif switch_path == 2:
+                self.set_10db_atten_path()
+            elif switch_path == 3:
+                self.set_1p2g_hpf_path()
+            elif switch_path == 4:
+                self.set_3g_hpf_path()
+            elif switch_path == 5:
+                self.set_6p4g_hpf_path()
+            elif switch_path == 6:
+                self.set_18g_hpf_path()
 
 
     class c_lte(object):
@@ -790,6 +894,13 @@ while int(row_count) < end_of_loop:  # stop variant
         logger.info('{0}'.format(workdir))
         logger.info('{0}'.format(132 * '-'))
         # time.sleep(10)
+
+        # Init Switch Box and open all paths.
+        if sw_box_interface == "GPIB":
+            swbox = c_switchbox()
+            swbox.connect()
+            swbox.set_all_port_open()
+
         # Init CMW
         if 1:
             logger.info('{0}'.format(132 * '-'))
@@ -817,8 +928,7 @@ while int(row_count) < end_of_loop:  # stop variant
             cmw.write("SYST:PRES:ALL")
             cmw.ask("*OPC?")
             # loop_rst = loop_rst + 1
-
-            logger.info('{0}'.format(132 * '-'))
+            time.sleep(0.5)
 
             logger.info('{0}'.format(132 * '-'))
             logger.info('QUERY ID')
@@ -1272,6 +1382,11 @@ while int(row_count) < end_of_loop:  # stop variant
 
             logger.info('{0}'.format(132 * '-'))
 
+            # Select FSW transducer file
+            pldir = os.path.join(os.getcwd(), "Pathloss")
+            plfnam = pathloss_file[switch_path] + ".csv"
+            plfile = os.path.join(pldir, plfnam)
+
             # Init Fsw
         if 1:
             logger.info('{0}'.format(132 * '-'))
@@ -1310,89 +1425,67 @@ while int(row_count) < end_of_loop:  # stop variant
             fsw.opt = fsw.ask("*OPT?")
 
             # fsw scpi commands start
-
             logger.info('{0}'.format(132 * '-'))
-            logger.info('RESET FSW')
-            #  Passing SCPI comands to FSW
-            logger.debug(132 * '-')
+            
             fsw.timeout = 30.0
-
+            logger.info('RESET FSW')
             # fsw.write("*CLS")
             fsw.write("*RST")
-            fsw.write("SYST:PRES:ALL")
             time.sleep(0.5)
 
             fsw.write("INIT:CONT ON")
-            logger.debug(132 * '_')
-            fsw.write("SENS:SWE:MODE LIST")
-            logger.info('{0}'.format(132 * '-'))
             logger.info('SCPI commands for FSW')
-            logger.info('{0}'.format(132 * '-'))
             logger.debug("run the Transducer file before Measurement")
-            fsw.write("MMEM:LOAD:TFAC 'C:\FSW_pathloss_041321.csv'")
-            fsw.write("SENSe:CORRection:TRANsducer:SELect 'FSW_pathloss_041321'")
+
+            if test_environment.upper() == "PHASE1":
+                fsw.write("MMEM:LOAD:TFAC 'C:\FSW_pathloss_041321.csv'")
+                fsw.write("SENSe:CORRection:TRANsducer:SELect 'FSW_pathloss_041321'")
+            else:
+                if not os.path.exists(plfile):
+                    raise ValueError(("Error! file {} does not exists.".format(plfile)))
+                logger.debug("Current transducer file: {}".format(plfile))
+                fsw.write("MMEM:LOAD:TFAC {}".format(plfile))
+                fsw.write("SENSe:CORRection:TRANsducer:SELect {}".format(pathloss_file[switch_path]))
+
             fsw.write("SENSe:CORRection:TRANsducer:STATe ON")
 
-            fsw.write("INIT:CONT OFF")
-            fsw.write("LIST:RANG:COUNt?")
-            fsw.write("SENS:LIST:RANG1:DEL")
-            fsw.write("SENS:LIST:RANG1:DEL")
-            fsw.write("SENS:LIST:RANG1:DEL")
-            fsw.write("SENS:LIST:RANG0:DEL")
-            # Frequency start and stop
-            fsw.write("SENS:LIST:RANG1:FREQ:STAR {0}".format(freq_start_r1))
-            fsw.write("SENS:LIST:RANG1:FREQ:STOP {0}".format(freq_stop_r1))
-
+            # Frequency start and stop for measurement
+            fsw.write("FREQ:STAR {0} MHz".format(int(freq_start_r1)))
+            logger.debug("FREQ:STAR {0} MHz".format(int(freq_start_r1)))
+            fsw.write("FREQ:STOP {0} MHz".format(int(freq_stop_r1)))
+            logger.debug("FREQ:STOP {0} MHz".format(int(freq_stop_r1)))
+            
             # Resolution Bandwidth and video Bandwidth
-            fsw.write("SENS:LIST:RANG1:BAND:RES {0}".format(int(rbw)))
-            logger.debug(132 * '_')
+            fsw.write("]BWIDth:RES {0} MHz".format(int(rbw)))
 
-            # Video Bandwidth
-            fsw.write("SENS:LIST:RANG1:BAND:VID {0}".format(int(vbw)))
-            if sweep_time == 'auto':
-                fsw.write("SENS:LIST:RANG1:SWE:TIME:AUTO ON")
-            else:
-                fsw.write("SENS:LIST:RANG1:SWE:TIME:AUTO OFF")
-                fsw.write("SENS:LIST:RANG1:SWE:TIME {0}".format(int(sweep_time / 1000)))
-
-            # sweep time
-            # fsw.write("SENS:LIST:RANG1:SWE:TIME:AUTO OFF")
-            # fsw.write("SENS:LIST:RANG1:SWE:TIME {0}".format(int(sweep_time/1000)))
-
-            logger.debug(132 * '_')
-
+            # Video Bandwidth)
+            fsw.write("]BWIDth:VID {0} MHz".format(int(vbw)))
+            
             # Ref_level and atten_ RF
-            fsw.write("SENS:LIST:RANG:RLEV {0}".format(ref_level))
-            fsw.write("SENS:LIST:RANG1:INP:ATT:AUTO OFF")
-            fsw.write("SENS:LIST:RANG1:INP:ATT {0}".format(attn))
-
-            fsw.write("SENS:LIST:RANG1:TRAN 'FSW_pathloss_041321'")
-
+            fsw.write("DISP:TRAC:Y:RLEV {}dBm".format(ref_level))
+            fsw.write("ATT:AUTO OFF")
+            fsw.write("INP:ATT {}dB".format(attn))
+            
             # SWEEP POINTS
-            fsw.write("SENS:LIST:RANG1:POIN {0}".format(sweep_point))
-            fsw.write(":SENS:LIST:RANG1:BRE OFF")
+            fsw.write("SWE:POIN {}".format(sweep_point))
 
             # pre Amp
             fsw.write(":SENS:LIST:RANG1:INP:GAIN:STAT {0}".format(pre_amp))
 
             # limit power
-            fsw.write("LIST:RANG1:LIM:STAR {0}".format(spec_limit))
-            fsw.write("LIST:RANG1:LIM:STOP {0}".format(spec_limit))
+            #fsw.write("LIST:RANG1:LIM:STAR {0}".format(spec_limit))
+            #fsw.write("LIST:RANG1:LIM:STOP {0}".format(spec_limit))
 
             # setting detector type pos/RMS/.....
-            fsw.write("SENS:LIST:RANG1:DET {0}".format(Detector))
+            fsw.write("CALC:MARKer1:FUNCtion:FMEasurement:DETector CRMS")
+            
             # sweep count
-            fsw.write(":SENS:SWE:COUN {0}".format(sweep_count))
-            # fsw.write("INIT:CONT OFF")
-            fsw.write("INP:ATT:AUTO OFF")
-            fsw.write("INP:ATT 30")
-            logger.info('{0}'.format(132 * '-'))
+            fsw.write("SWE:COUN {}".format(sweep_count))
+            #fsw.write("INIT:CONT OFF")
 
             # Turn LTE Cell ON
         if 1:
-            #
             logger.info('{0}'.format(132 * '-'))
-
 
             def lte_turn_on():
                 logger.info('TURN LTE CELL ON')
@@ -1571,6 +1664,7 @@ while int(row_count) < end_of_loop:  # stop variant
                 logger.debug(132 * '_')
                 logger.info('{0}'.format(132 * '-'))
 
+                """
                 if cmw_interface == "LAN":
                     Tx_multi_avg_result = cmw.ask("FETCh:LTE:MEAS:MEValuation:MODulation:AVERage?")
                 else:
@@ -1607,6 +1701,8 @@ while int(row_count) < end_of_loop:  # stop variant
                     logger.debug('{0}:{1:>8}'.format(res1[i_meas], Tx_multi_extreme_result[i_meas]))
                 logger.debug("Tx multievaluation extreme:{0}".format(Tx_multi_extreme_result))
                 """
+                
+                """
                 Tx_multi_SDEViation_result = cmw.read("READ:LTE:MEAS<i>:MEValuation:MODulation:SDEViation?")
                 res = ['1_Reliability', '2_OutOfTol', '3_EVM_RMSlow', '4_EVM_RMShigh', '5_EVMpeakLow', '6_EVMpeakHigh',
                        '7_MErr_RMSlow', '8_MErr_RMShigh', '9_MErrPeakLow', '10_MErrPeakHigh', '11_PErr_RMSlow',
@@ -1621,27 +1717,29 @@ while int(row_count) < end_of_loop:  # stop variant
                 logger.debug("Tx_multi_SDEViation_result:{0}".format(Tx_multi_SDEViation_result))
                 """
 
-            fsw.write("LIST:RANG:LIM:STAT ON")
+            # Switch path for FSW measurement
+            swbox.set_sw_box(switch_path)
+
+            # Set peak search
             fsw.write("CALC:PSE:MARG 100")
             fsw.write("CALC:PSE:PSH ON")
             fsw.write("CALC:PSE:SUBR 1")
-
-            fsw.write("INIT:SPUR; *WAI")
-            # time.sleep(.5)
-            # fsw.result = fsw.ask("CALC:LIM1:FAIL?")
-            # logger.debug('result is: {0}'.format(fsw.result))  # this scpi
-            time.sleep(25)
-            if fsw_interface == "LAN":
-                list_of_Freq = fsw.ask("TRAC:DATA? SPURIOUS")
+            fsw.write("CALC:MARK:MAX:AUTO ON")
+            
+            if (freq_start_r1 > 3000):
+                time.sleep(3)  # 6)
             else:
-                list_of_Freq = fsw.ask("TRAC:DATA? SPURIOUS").split(',')
-
-            time.sleep(7)
-            # when it returns, at that time length of list_freq ==1
-            logger.debug(len(list_of_Freq))
-            logger.debug(list_of_Freq)
+                time.sleep(1)  # 3)
+            
+            peak_y = float(fsw.ask("CALC:MARK1:Y?"))
+            time.sleep(0.5)
+            peak_x = float(fsw.ask("CALC:MARK1:X?"))
+            time.sleep(0.5)
+            
+            list_of_Freq = [round(peak_x/1000), peak_y, peak_y - spec_limit]
+            logger.debug("list_of_freq: {}".format(list_of_Freq))
+            
             # FSW instrument screeshot
-
             fsw.write("FORM:DEXP:FORM CSV")
             fsw.write("FORM:DEXP:DSEP POIN")
             fsw.write("FORM:DEXP:FORM CSV")
@@ -1649,7 +1747,6 @@ while int(row_count) < end_of_loop:  # stop variant
             fsw.write("FORM:DEXP:TRAC SING")
 
             # Directory path of csv
-
             fsw.write("MMEM:STOR1:TRAC 1,'C:\\R_S\\instr\\user\\fsw_Results_{0}.CSV'".format(row_count))
             logger.debug(len(list_of_Freq))
             logger.debug(list_of_Freq)
@@ -1665,28 +1762,16 @@ while int(row_count) < end_of_loop:  # stop variant
                 z = y.tolist()
                 Meas_range = [z[i:i + n] for i in range(0, len(z), n)]
 
-
                 def Extract(Meas_range):
                     Freq = list(map(itemgetter(0), Meas_range))
                     Power_abs = list(map(itemgetter(1), Meas_range))
                     Limit_p = list(map(itemgetter(2), Meas_range))
                     return Freq, Power_abs, Limit_p
 
-
                 Meas = Extract(Meas_range)
                 for i in Meas:
                     logger.debug(i)
 
-                # min = -30.0
-                # max = -36.0
-                verdict = []
-                # summary =[]
-                if Meas[1][0] < float(spec_limit):
-                    # summary = 'PASS'
-                    verdict = 'PASS'
-                else:
-                    # summary = 'FAIL'
-                    verdict = 'FAIL'
                 """
                 abs_fre = [Meas[1][0]]
                 logger.debug ("abs power msw value are {0}".format(Meas[1][0]))
@@ -1694,14 +1779,12 @@ while int(row_count) < end_of_loop:  # stop variant
                 logger.debug(abs_fre)
                 logger.debug(len(abs_fre))
 
-
                 if abs_fre <= float(spec_limit):
                     logger.debug("abs _power {0}".format(abs_fre))
                     verdict.extend(['PASS'])
                 else:
                     logger.debug("abs _power {0}".format(abs_fre))
                     verdict.extend(['FAIL'])
-
 
                 # range 4 value
                 if abs_fre[3] <= float(min) :
@@ -1726,20 +1809,34 @@ while int(row_count) < end_of_loop:  # stop variant
                 DL_freq = [DL_EARFCN]
                 # initialization of result list
                 # ref_power = [-36, -36, -36, -30, -30]
-                margin_l = []
-                zip_object = zip(abs_power, limit)
-                for list1_i, list2_i in zip_object:
-                    margin_l.append(list1_i - list2_i)
+                #margin_l = []
+                #zip_object = zip(abs_power, limit)
+                #for list1_i, list2_i in zip_object:
+                #    margin_l.append(list1_i - list2_i)
 
                 # append each difference to list
-                logger.debug(margin_l)  # Ref_level
+                #logger.debug(margin_l)  # Ref_level
+                #margin = []  # Diff 0f -36-(-limit)
+                #zip_object = zip(margin_l, limit)
+                #for list1_j, list2_j in zip_object:
+                #    margin.append(list2_j - list1_j)
+                
                 margin = []  # Diff 0f -36-(-limit)
-                zip_object = zip(margin_l, limit)
-                for list1_j, list2_j in zip_object:
-                    margin.append(list2_j - list1_j)
+                margin.append(spec_limit - abs_power[0])
 
                 # append each difference to list
-                logger.debug(margin)
+                logger.debug("margin={}".format(margin))
+
+                # min = -30.0
+                # max = -36.0
+                verdict = []
+                # summary =[]
+                if margin[0] > 0:
+                    # summary = 'PASS'
+                    verdict = 'PASS'
+                else:
+                    # summary = 'FAIL'
+                    verdict = 'FAIL'
 
                 # verdict list
                 logger.debug(Meas)
@@ -1748,7 +1845,7 @@ while int(row_count) < end_of_loop:  # stop variant
                 logger.debug(132 * '-')
                 logger.debug(" Range  |  Freq  kHZ| PowerAbs(-dbm) |  limit (-db) | Margin(-dbm) | Verdict  ")
                 logger.debug(
-                    " Range1 | {0:.05f}     | {1:.02f} |  {2:.02f} ||  {3:.02f} |{4}  ".format(Meas[0][0] / 1000,
+                    " Range | {0:.05f}     | {1:.02f} |  {2:.02f} ||  {3:.02f} |{4}  ".format(Meas[0][0] / 1000,
                                                                                                Meas[1][0],
                                                                                                Meas[2][0], margin[0],
                                                                                                verdict[0]))
@@ -1839,7 +1936,7 @@ while int(row_count) < end_of_loop:  # stop variant
        'DL RB Allocation':[DL_RB_Allocation], 'DL RB START':[DL_RB_Start], 'DL MODULATION':[DL_MODULATION], 'RB CONNECTION':[DL_TBS],
        'START_FREQ':[freq_start_r1], 'STOP_FREQ':[freq_stop_r1], 'DELFOB':[DelFOB], 'SWITCH':[switch_path], 'REF_LEVEL':[ref_level], 'ATTN':[attn],
        'RBW':[rbw], 'VBW':[vbw], 'PRE_AMP':[pre_amp], 'TRACE':[Trace], 'DETECTOR':[Detector], 'SWEEP_TIME':[sweep_time],
-       'SWEEP_POINT':[sweep_point], 'SWEEP_COUNT':[sweep_count],'TX PWR(-db)': [Tx_P],'SPUR PEAK FRQ RANGE1 (KHz)': [freq_ranges[0] / 1000],'SPUR ABS_PWR RANGE1(-dbm)': [abs_power[0]], 'SPUR_LIMIT_RANGE1(-db)': [margin_l[0]],'MARGIN_RANGE1(-dbm)': [margin[0]], 'SCREENSHOT': [screenshot]}
+       'SWEEP_POINT':[sweep_point], 'SWEEP_COUNT':[sweep_count],'TX PWR(dB)': [Tx_P],'SPUR PEAK FRQ RANGE1 (KHz)': [freq_ranges[0] / 1000],'SPUR ABS_PWR RANGE1(dBm)': [abs_power[0]], 'SPUR_LIMIT_RANGE1(dBm)': [margin[0]],'MARGIN_RANGE1(dBm)': [margin[0]], 'SCREENSHOT': [screenshot]}
         # lte_tx_result = {'VERDICT': [Verdict_ctf], "BAND": [Band], "UPLINK FREQUENCY": [UL_EARFCN],
         #                  'C_BW(MHz)': [Channel_Bandwidth],
         #                  'UL RB': [UL_RB_Allocation], 'UL RB START': [UL_RB_Start], 'TX PWR(-db)': [Tx_P],
