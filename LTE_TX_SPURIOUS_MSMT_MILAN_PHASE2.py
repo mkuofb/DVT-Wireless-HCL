@@ -1718,7 +1718,8 @@ while int(row_count) < end_of_loop:  # stop variant
                 """
 
             # Switch path for FSW measurement
-            swbox.set_sw_box(switch_path)
+            if sw_box_interface == "GPIB":
+                swbox.set_sw_box(switch_path)
 
             # Set peak search
             fsw.write("CALC:PSE:MARG 100")
@@ -1731,10 +1732,14 @@ while int(row_count) < end_of_loop:  # stop variant
             else:
                 time.sleep(1)  # 3)
             
-            peak_y = float(fsw.ask("CALC:MARK1:Y?"))
-            time.sleep(0.5)
-            peak_x = float(fsw.ask("CALC:MARK1:X?"))
-            time.sleep(0.5)
+            if fsw_interface == "LAN":
+                peak_y = float(fsw.ask("CALC:MARK1:Y?")[0])
+                peak_x = float(fsw.ask("CALC:MARK1:X?")[0])
+            else:
+                peak_y = float(fsw.ask("CALC:MARK1:Y?"))
+                time.sleep(0.5)
+                peak_x = float(fsw.ask("CALC:MARK1:X?"))
+                time.sleep(0.5)
             
             list_of_Freq = [round(peak_x/1000), peak_y, peak_y - spec_limit]
             logger.debug("list_of_freq: {}".format(list_of_Freq))
