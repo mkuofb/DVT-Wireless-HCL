@@ -47,11 +47,11 @@ if test_environment.upper() == "PHASE1":
     dut_adb_serial_number = "225c2b92"
     screenshot_host_ip = "192.168.0.219"
 else:
-    cmw_interface = "GPIB"
+    cmw_interface = "LAN"
     fsw_interface = "GPIB"
     sw_box_interface = "GPIB"
-    dut_adb_serial_number = "4D123456789"
-    screenshot_host_ip = "172.22.1.5"
+    dut_adb_serial_number = "225c2b92"  # "4D123456789"
+    screenshot_host_ip = "192.168.0.219"  # "172.22.1.5"
 
 # create a log
 logger = logging.getLogger(__name__)
@@ -92,12 +92,41 @@ fh = logging.FileHandler(logfilename, mode='w')
 fh.setFormatter(logging.Formatter(logger_format))
 # add file handle to logger instance
 logger.addHandler(fh)
+
+
+# Menu for input file
+while True:
+    logger.debug("choose the input file")
+    logger.debug("1.Harmonics_Sweep_v1.xlsx")
+    logger.debug("2.Harmonics_Sweep_v3.xlsx")
+    logger.debug("3.Harmonics_Sweep_v4.xlsx")
+    logger.debug("4.Harmonics_Sweep_v5.xlsx")
+    logger.debug("5.Harmonics_Sweep_v6.xlsx")
+    choice= int(input("enter your choice"))
+    if choice == 1:
+        LTE_FILE = 'Harmonics_Sweep_v1.xlsx'
+        break
+    elif choice == 2:
+        LTE_FILE = 'Harmonics_Sweep_v3.xlsx'
+        break
+    elif choice == 3:
+        LTE_FILE = 'Harmonics_Sweep_v4.xlsx'
+        break
+    elif choice == 4:
+        LTE_FILE = 'Harmonics_Sweep_v5.xlsx'
+        break
+    elif choice == 4:
+        LTE_FILE = 'Harmonics_Sweep_v6.xlsx'
+        break
+    else:
+        logger.debug("No file chosen")
+
 # *************************************Create Test File From Raw file **********************
 
-header_list = pd.read_excel('Harmonics_Sweep_v1.xlsx', skiprows=3).columns
-#print(header_list)
-Band_filter = pd.read_excel('Harmonics_Sweep_v1.xlsx', skiprows=1).columns
-Port_filter = pd.read_excel('Harmonics_Sweep_v1.xlsx', skiprows=2).columns
+header_list = pd.read_excel(LTE_FILE, skiprows=3).columns
+
+Band_filter = pd.read_excel(LTE_FILE, skiprows=1).columns
+Port_filter = pd.read_excel(LTE_FILE, skiprows=2).columns
 logger.debug(Band_filter[2])# 2
 logger.debug(Port_filter[2])
 
@@ -117,7 +146,7 @@ writer.save()  # this create Excel file with your desired titles
 # to pick min/max power input file from ctf command ine
 # *************************************COpy DATA From Raw file to Test FIle**********************
 # Is use to create a reference of the Excel to wb
-wb1 = openpyxl.load_workbook('Harmonics_Sweep_v1.xlsx')
+wb1 = openpyxl.load_workbook(LTE_FILE)
 wb2 = openpyxl.load_workbook('Harmonics_Sweep_v2.xlsx')
 
 # sband = [3, 2]
@@ -134,21 +163,23 @@ for row in sh1.iter_rows():
 
     if row[7].value == 2 or row[7].value == 4 or row[7].value == 5 or row[7].value == 12 or row[7].value == 13 or row[7].value == 66:  # filter on first column with value 16 [band == 2]
         # print(row[0].value)
+     #if row[7].value ==13:
         if row[3].value == Port_filter[2] :
             sh2.append((cell.value for cell in row))
 
-wb1.save("Harmonics_Sweep_v1.xlsx")
+wb1.save(LTE_FILE)
 wb2.save("Harmonics_Sweep_v2.xlsx")
 # *************************************COpy DATA From Raw file to Test FIle**********************
 
 if sys.argv[1] == 'Harmonics' or sys.argv[1] == 'harmonics' or sys.argv[1] == None:
-    LTE_FILE = 'Harmonics_Sweep_v2.xlsx'
+    lte_tx_input_file = 'Harmonics_Sweep_v2.xlsx'
     logger.debug("TEST is based on 3gpp MAX power Value -23dbm")
 else:
     logger.debug(" Please check the command line argument  either MAX/max or MIN/min valid, Refer to Test Description")
 
 # pick the min/max input file from current directory
-inp_file = ("{1}\\{0}".format(LTE_FILE, os.getcwd()))
+inp_file = ("{1}\\{0}".format(lte_tx_input_file, os.getcwd()))
+logger.debug("input file is {0}".format(inp_file))
 wb = xlrd.open_workbook(inp_file)
 #sheet = wb.get_sheet_by_name('Harmonics_Sweep_v1') 
 sheet = wb.sheet_by_index(0)
@@ -187,8 +218,8 @@ writer.save()  # this create Excel file with your desired titles
 
 # row_count = int(sys.argv[2]) # start variant
 # start of the while  loop
-row_count = 2
-end_of_loop = 162
+row_count = 8
+end_of_loop = 9
 loop_rst = 1
 while int(row_count) < end_of_loop:  # stop variant
     pos = 0
@@ -209,7 +240,7 @@ while int(row_count) < end_of_loop:  # stop variant
     Call_Type = str(sheet.cell_value(row_count, 4))
     NS_Filter = int(sheet.cell_value(row_count, 5))
 
-    pmx= int(sheet.cell_value(row_count, 6))-6
+    pmx= int(sheet.cell_value(row_count, 6))
     logger.debug(pmx)
     logger.debug(type(pmx))
     #pmx = 24
@@ -260,8 +291,8 @@ while int(row_count) < end_of_loop:  # stop variant
     sweep_point = int(sheet.cell_value(row_count, 31))
     sweep_count = int(sheet.cell_value(row_count, 32))
     spec_limit = int(sheet.cell_value(row_count, 33))
-    UL_ATT = (sheet.cell_value(row_count, 34))+ 3
-    DL_ATT = (sheet.cell_value(row_count, 35)) +3
+    UL_ATT = (sheet.cell_value(row_count, 34))
+    DL_ATT = (sheet.cell_value(row_count, 35))
 
     # set log level
     # logger.setLevel(logging.DEBUG)
@@ -541,7 +572,7 @@ while int(row_count) < end_of_loop:  # stop variant
         def __init__(self, instr_name):
             self.cmw_gpib_addr = 'GPIB0::20::INSTR'
             self.fsw_gpib_addr = 'GPIB0::21::INSTR'
-            self.sw_box_gpib_addr = 'GPIB0::4::INSTR'
+            self.sw_box_gpib_addr = 'GPIB0::7::INSTR'  # 'GPIB0::4::INSTR'
             self.pwr_supply_gpib_addr = 'GPIB0::5::INSTR'
             self.instr_name = instr_name
             self.instr = None
@@ -927,7 +958,6 @@ while int(row_count) < end_of_loop:  # stop variant
             cmw.write("*CLS")
             cmw.write("SYST:PRES:ALL")
             cmw.ask("*OPC?")
-            # loop_rst = loop_rst + 1
             time.sleep(0.5)
 
             logger.info('{0}'.format(132 * '-'))
@@ -1186,8 +1216,8 @@ while int(row_count) < end_of_loop:  # stop variant
 
             logger.info('LTE Cell - Set input and output path')
             logger.info(' including signal routing and Programming external attenuation.')
-            #dl_att = 6.00
-            #ul_att = 6.00
+            #dl_att = 3.8
+            #ul_att = 3.8
             cmw.write("CONF:LTE:SIGN:RFS:PCC:EATT:OUTP {0:0.2f}".format(float(DL_ATT)))  # 779 __<VAR
             cmw.write("CONF:LTE:SIGN:RFS:PCC:EATT:INP {0:0.2f}".format(float(UL_ATT)))  # 741
             logger.info('{0}'.format(132 * '-'))
@@ -1333,12 +1363,10 @@ while int(row_count) < end_of_loop:  # stop variant
             cmw.write("CONF:LTE:SIGN:CONNection:PDCCh:RPDCch ON")
             logger.info('{0}'.format(132 * '-'))
             logger.info(' Configure RMC Test Mode Call. (User Defined Channel)')
-            cmw.write("CONF:LTE:SIGN:CONN:UET UDCH")
-
-            # cmw.write("CONF:LTE:SIGN:CONN:UDCH:DL {0},{1},{2},{3}".format(DL_RB_Allocation,
-            #       DL_RB_Start, DL_MODULATION, DL_TBS))
-            # cmw.write("CONF:LTE:SIGN:CONN:UDCH:UL {0},{1},{2},{3}".format(UL_RB_Allocation,
-            #       UL_RB_Start, UL_MODULATION, UL_TBS))
+            #cmw.write("CONF:LTE:SIGN:CONN:UET UDCH")
+            #UL_TBS
+            #cmw.write("CONF:LTE:SIGN:CONN:UDCH:DL {0},{1},{2}".format(DL_RB_Allocation, DL_RB_Start, DL_MODULATION))
+            #cmw.write("CONF:LTE:SIGN:CONN:UDCH:UL {0},{1},{2}".format(UL_RB_Allocation, UL_RB_Start, UL_MODULATION))
 
             erreur = cmw.ask("SYST:ERR:ALL?")
             if erreur[0] != '0':
@@ -1383,9 +1411,10 @@ while int(row_count) < end_of_loop:  # stop variant
             logger.info('{0}'.format(132 * '-'))
 
             # Select FSW transducer file
-            pldir = os.path.join(os.getcwd(), "Pathloss")
-            plfnam = pathloss_file[switch_path] + ".csv"
-            plfile = os.path.join(pldir, plfnam)
+            if test_environment.upper() != "PHASE1":
+                pldir = os.path.join(os.getcwd(), "Pathloss")
+                plfnam = pathloss_file[switch_path] + ".csv"
+                plfile = os.path.join(pldir, plfnam)
 
             # Init Fsw
         if 1:
@@ -1426,18 +1455,22 @@ while int(row_count) < end_of_loop:  # stop variant
 
             # fsw scpi commands start
             logger.info('{0}'.format(132 * '-'))
-            
-            fsw.timeout = 30.0
             logger.info('RESET FSW')
+            #  Passing SCPI comands to FSW
+            logger.debug(132 * '-')
+            fsw.timeout = 30.0
+
             # fsw.write("*CLS")
             fsw.write("*RST")
+            # fsw.write("SYST:PRES:ALL")
             time.sleep(0.5)
 
             fsw.write("INIT:CONT ON")
             logger.info('SCPI commands for FSW')
             logger.debug("run the Transducer file before Measurement")
 
-            if test_environment.upper() == "PHASE1":
+            # if test_environment.upper() == "PHASE1":
+            if (1):
                 fsw.write("MMEM:LOAD:TFAC 'C:\FSW_pathloss_041321.csv'")
                 fsw.write("SENSe:CORRection:TRANsducer:SELect 'FSW_pathloss_041321'")
             else:
@@ -1456,10 +1489,10 @@ while int(row_count) < end_of_loop:  # stop variant
             logger.debug("FREQ:STOP {0} MHz".format(int(freq_stop_r1)))
             
             # Resolution Bandwidth and video Bandwidth
-            fsw.write("]BWIDth:RES {0} MHz".format(int(rbw)))
-
+            fsw.write("BWIDth:RES {0} MHz".format(rbw))
             # Video Bandwidth)
-            fsw.write("]BWIDth:VID {0} MHz".format(int(vbw)))
+            fsw.write("BWIDth:VID {0} MHz".format(vbw))
+            logger.debug("FSW RBW={0}MHz VBW={1}MHz".format(rbw, vbw))
             
             # Ref_level and atten_ RF
             fsw.write("DISP:TRAC:Y:RLEV {}dBm".format(ref_level))
@@ -1473,8 +1506,8 @@ while int(row_count) < end_of_loop:  # stop variant
             fsw.write(":SENS:LIST:RANG1:INP:GAIN:STAT {0}".format(pre_amp))
 
             # limit power
-            #fsw.write("LIST:RANG1:LIM:STAR {0}".format(spec_limit))
-            #fsw.write("LIST:RANG1:LIM:STOP {0}".format(spec_limit))
+            fsw.write("LIST:RANG1:LIM:STAR {0}".format(spec_limit))
+            fsw.write("LIST:RANG1:LIM:STOP {0}".format(spec_limit))
 
             # setting detector type pos/RMS/.....
             fsw.write("CALC:MARKer1:FUNCtion:FMEasurement:DETector CRMS")
@@ -1595,6 +1628,10 @@ while int(row_count) < end_of_loop:  # stop variant
                     result = "FAIL"
 
             # Enabling TX Measurement
+            cmw.write("CONF:LTE:SIGN:CONN:UET UDCH")
+            # UL_TBS
+            # cmw.write("CONF:LTE:SIGN:CONN:UDCH:DL {0},{1},{2},{3}".format(DL_RB_Allocation, DL_RB_Start, DL_MODULATION,DL_TBS))
+            # cmw.write("CONF:LTE:SIGN:CONN:UDCH:UL {0},{1},{2},{3}".format(UL_RB_Allocation, UL_RB_Start, UL_MODULATION, UL_TBS))
             tx_mev = True
             if tx_mev:
                 logger.debug("LTE TX Multi-Evaluation TEST")
@@ -1750,6 +1787,7 @@ while int(row_count) < end_of_loop:  # stop variant
             fsw.write("FORM:DEXP:FORM CSV")
             fsw.write("FORM:DEXP:HEAD ON")
             fsw.write("FORM:DEXP:TRAC SING")
+            fsw.write("DISP:WIND1:TRAC:PRES MCM")
 
             # Directory path of csv
             fsw.write("MMEM:STOR1:TRAC 1,'C:\\R_S\\instr\\user\\fsw_Results_{0}.CSV'".format(row_count))
@@ -2022,7 +2060,7 @@ for fname in os.listdir(dest):
 
 
 # Source path
-source = "{0}\\{1}".format(os.getcwd(), LTE_FILE)
+source = "{0}\\{1}".format(os.getcwd(), lte_tx_input_file)
 # Destination path
 destination = dest_d
 # Copy the content of
@@ -2108,5 +2146,7 @@ class CtfVisualization:
 if __name__ == "__main__":
     cv = CtfVisualization(path=dest_d)
     cv.create_json()
+
+#shutil.move(logfilename,dest_d)
 
 # THE END
