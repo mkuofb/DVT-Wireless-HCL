@@ -27,7 +27,7 @@ from ctf_json_data import CtfJsonData
 
 
 # Setup Configuration
-test_environment = "phase1"  # phase1 or phase2
+test_environment = "phase2"  # phase1 or phase2
 cmw_interface = "LAN"
 fsw_interface = "LAN"
 sw_box_interface = "GPIB"
